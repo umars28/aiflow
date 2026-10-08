@@ -33,7 +33,9 @@ if [ -n "$lintcmd" ]; then
   fi
 fi
 
-if git -C "$root" diff --name-only HEAD | grep -qE '_test\.(go|py|ts|js)$|\.test\.(ts|js)$|_spec\.rb$'; then
+changed=$( { git -C "$root" diff --name-only HEAD; git -C "$root" ls-files --others --exclude-standard; } | sort -u )
+
+if printf '%s\n' "$changed" | grep -qE '_test\.(go|py|ts|js)$|\.test\.(ts|js)$|_spec\.rb$|(^|/)tests?/'; then
   printf '  \033[32m✓\033[0m test files changed alongside the code\n'
 else
   printf '  \033[31m✗\033[0m no test file changed — new code without a test does not pass\n'

@@ -88,7 +88,14 @@ cmd_run() {
   {
     cat "$prompt"
     if [ $# -gt 0 ]; then printf '\n\n## Arguments\n\n%s\n' "$*"; fi
-  } | claude -p --model "$model" --max-turns "$turns" 2>&1 | tee "$log"
+  } | claude -p --model "$model" --max-turns "$turns" --allowedTools "$(stage_tools "$stage")" 2>&1 | tee "$log"
+
+  if [ -z "$(git -C "$root" status --porcelain)" ]; then
+    warn "the agent wrote nothing"
+    warn "most often a PreToolUse hook blocked the writes; headless runs cannot answer a prompt"
+    warn "check: jq -r '.hooks.PreToolUse' ~/.claude/settings.json"
+    die "nothing to gate"
+  fi
 
   if [ -x "$gate" ]; then
     info "gate: $(basename "$gate")"
@@ -103,6 +110,16 @@ stage_model() {
   case "$1" in
     review) echo claude-sonnet-5 ;;
     *) echo claude-opus-5 ;;
+  esac
+}
+
+stage_tools() {
+  case "$1" in
+    design)  echo "Read,Grep,Glob,Write,Bash(go test:*),Bash(npm test:*),Bash(pytest:*),Bash(cargo test:*)" ;;
+    plan)    echo "Read,Grep,Glob,Write" ;;
+    build)   echo "Bash,Read,Write,Edit,Grep,Glob" ;;
+    review)  echo "Bash(git:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(find:*),Read,Grep,Glob,Write" ;;
+    *)       echo "Read,Grep,Glob" ;;
   esac
 }
 
