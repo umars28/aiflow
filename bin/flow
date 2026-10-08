@@ -135,11 +135,17 @@ cmd_new() {
 
   tokenfile="$CONFIG_DIR/oauth-token"
   if [ -s "$tokenfile" ]; then
-    tr -d '[:space:]' < "$tokenfile" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo "$owner/$name" >/dev/null 2>&1 \
-      && info "secret set" || warn "could not set the secret"
+    tok=$(sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$tokenfile" | grep -oE 'sk-ant-[A-Za-z0-9_-]+' | head -1)
+    if [ "${#tok}" -lt 40 ]; then
+      warn "no usable token found in $tokenfile"
+      warn "run 'claude setup-token', then paste just the sk-ant-... value into that file"
+    else
+      printf '%s' "$tok" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo "$owner/$name" >/dev/null 2>&1 \
+        && info "secret set" || warn "could not set the secret"
+    fi
   else
     warn "no token at $tokenfile, so the secret was not set"
-    warn "create it once:  claude setup-token > $tokenfile && chmod 600 $tokenfile"
+    warn "run 'claude setup-token' once, then paste the sk-ant-... value into $tokenfile"
   fi
 
   gh label create ai-review --repo "$owner/$name" --color B60205 \
