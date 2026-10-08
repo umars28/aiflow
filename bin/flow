@@ -294,13 +294,17 @@ collect() {
     run=$(gh run list --repo "$repo" --limit 1 \
             --json status,conclusion,name,createdAt,url,headBranch \
             --jq '.[0] // empty' 2>/dev/null || true)
-    prs=$(gh pr list --repo "$repo" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+    prlist=$(gh pr list --repo "$repo" --state open --limit 20 \
+               --json number,title,url,createdAt,isDraft \
+               --jq '[.[] | select(.isDraft | not) | {number, title, url, created_at: .createdAt}]' 2>/dev/null || echo '[]')
+    prs=$(printf '%s' "$prlist" | jq 'length')
 
     if [ -z "$run" ]; then
       printf '%s' '{}' | jq -c --arg repo "$repo" --argjson prs "$prs" \
-        '{repo:$repo, state:"idle", stage:null, branch:null, created_at:null, url:null, prs:$prs}'
+        --argjson prlist "$prlist" \
+        '{repo:$repo, state:"idle", stage:null, branch:null, created_at:null, url:null, prs:$prs, open_prs:$prlist}'
     else
-      printf '%s' "$run" | jq -c --arg repo "$repo" --argjson prs "$prs" '
+      printf '%s' "$run" | jq -c --arg repo "$repo" --argjson prs "$prs" --argjson prlist "$prlist" '
         {
           repo: $repo,
           state: (
@@ -316,7 +320,8 @@ collect() {
           branch: .headBranch,
           created_at: .createdAt,
           url: .url,
-          prs: $prs
+          prs: $prs,
+          open_prs: $prlist
         }'
     fi
   done

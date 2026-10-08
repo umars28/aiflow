@@ -37,10 +37,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\n\nconst out = [];\nfor (const r of data.repos || []) {\n  if (r.state !== 'failed') {\n    delete store.seen[r.repo];\n    continue;\n  }\n  if (store.seen[r.repo] === r.url) continue;\n  store.seen[r.repo] = r.url;\n\n  const short = r.repo.split('/')[1] || r.repo;\n  const where = [r.stage, r.branch].filter(Boolean).join(' on ');\n  out.push({ json: {\n    repo: r.repo,\n    text: '\\u274c <b>' + short + '</b>\\n' + where + '\\n' + (r.url || '')\n  }});\n}\nreturn out;"
+        "jsCode": "const data = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nstore.prs = store.prs || {};\n\nconst out = [];\n\nfor (const r of data.repos || []) {\n  if (r.state === 'failed') {\n    if (store.seen[r.repo] !== r.url) {\n      store.seen[r.repo] = r.url;\n      const short = r.repo.split('/')[1] || r.repo;\n      const where = [r.stage, r.branch].filter(Boolean).join(' on ');\n      out.push({ json: { text: '\\u274c <b>' + short + '</b>\\n' + where + '\\n' + (r.url || '') } });\n    }\n  } else {\n    delete store.seen[r.repo];\n  }\n\n  const open = {};\n  for (const pr of r.open_prs || []) {\n    open[pr.number] = true;\n    const key = r.repo + '#' + pr.number;\n    if (store.prs[key]) continue;\n    store.prs[key] = true;\n    const short = r.repo.split('/')[1] || r.repo;\n    out.push({ json: { text: '\\u{1F440} <b>' + short + '</b> waiting on you\\n#' + pr.number + ' ' + pr.title + '\\n' + pr.url } });\n  }\n  for (const key of Object.keys(store.prs)) {\n    if (!key.startsWith(r.repo + '#')) continue;\n    if (!open[key.split('#')[1]]) delete store.prs[key];\n  }\n}\n\nreturn out;"
       },
       "id": "a3333333-3333-4333-8333-333333333333",
-      "name": "New failures only",
+      "name": "New failures and PRs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -83,14 +83,14 @@
       "main": [
         [
           {
-            "node": "New failures only",
+            "node": "New failures and PRs",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "New failures only": {
+    "New failures and PRs": {
       "main": [
         [
           {
