@@ -55,7 +55,7 @@ watching the agent yourself.
 
 ## Add a new project
 
-Two files:
+Two files, two one-time grants.
 
 ```sh
 cd <project>
@@ -65,8 +65,23 @@ curl -sL https://raw.githubusercontent.com/umars28/aiflow/main/templates/ai.yml 
   -o .github/workflows/ai.yml
 ```
 
-`ai.yml` only calls the reusable workflows in this repo. It needs no edits — everything
-project-specific lives in `.aiflow/project.yaml`.
+For an infra repo, fetch `templates/ai-review-only.yml` instead. It drops the `build` job
+entirely, so no run can ever write to the repository.
+
+`ai.yml` only calls the reusable workflows here. It needs no edits — everything
+project-specific lives in `.aiflow/project.yaml`. Commit it to the **default branch** before
+opening any pull request against it (see Troubleshooting).
+
+Then grant the two things that are per-repository and easy to forget:
+
+```sh
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo umars28/<repo>
+```
+
+and add the repository to the Claude GitHub App at
+[github.com/settings/installations](https://github.com/settings/installations). Installing the
+app on one repository does not cover the others; a missing grant fails the run with
+"Claude Code is not installed on this repository".
 
 ## Per-project adapter
 
