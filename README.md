@@ -116,9 +116,21 @@ tuning pass:
 | Timeout | 10 min review · 45 min build |
 | Nightly | Skipped when `main` has been idle for 24 hours |
 
+## Credentials
+
+`umars28` is a personal account, not an organization, so Actions secrets are per repository —
+there is no org-wide secret to share. Run this once per repo:
+
+```sh
+claude setup-token
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo umars28/<repo>
+```
+
+Then install the [Claude GitHub App](https://github.com/apps/claude) on that repository.
+
 ## Kill switch
 
 ```sh
-gh workflow disable AI --repo umars28/<repo>              one repo
-gh secret delete CLAUDE_CODE_OAUTH_TOKEN --org umars28    everything
+gh workflow disable AI --repo umars28/<repo>                   stop one repo
+gh secret delete CLAUDE_CODE_OAUTH_TOKEN --repo umars28/<repo> revoke one repo
 ```
