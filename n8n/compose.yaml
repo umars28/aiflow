@@ -1,0 +1,23 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - GENERIC_TIMEZONE=Asia/Jakarta
+      - TZ=Asia/Jakarta
+      - N8N_SECURE_COOKIE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - TELEGRAM_TOKEN=__SET_ON_SERVER__
+      - TELEGRAM_CHAT_ID=705649915
+      - AIFLOW_STATUS_URL=https://umars28.github.io/aiflow/status.json
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
