@@ -4,7 +4,7 @@ set -eu
 AIFLOW_HOME="${AIFLOW_HOME:-$(CDPATH= cd -- "$(dirname -- "$(readlink "$0" || echo "$0")")/.." && pwd)}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/flow"
 REPOS_FILE="$CONFIG_DIR/repos"
-STAGES="design plan build review"
+STAGES="design plan build review fix"
 
 die() { printf 'flow: %s\n' "$1" >&2; exit 1; }
 info() { printf '\033[36m▸\033[0m %s\n' "$1"; }
@@ -80,6 +80,73 @@ YAML
   sed 's/^/  /' "$out"
 }
 
+cmd_new() {
+  name="${1:-}"
+  test -n "$name" || die "usage: flow new <name> --stack go|node|python|rust|infra [--private]"
+  shift
+  stack=""; visibility=--public
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stack) stack="${2:-}"; shift 2 ;;
+      --stack=*) stack="${1#--stack=}"; shift ;;
+      --private) visibility=--private; shift ;;
+      --public) visibility=--public; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  test -n "$stack" || die "--stack is required for a new project"
+  need gh
+  need git
+
+  owner=$(gh api user --jq .login)
+  parent=$(dirname "$PWD")
+  case "$PWD" in *"/$name") dir="$PWD" ;; *) dir="$PWD/$name" ;; esac
+  test ! -d "$dir/.git" || die "$dir is already a git repository"
+
+  mkdir -p "$dir"
+  cd "$dir"
+  git init -q -b main
+  git commit -q --allow-empty -m init
+
+  cmd_init --stack "$stack" >/dev/null
+  info "adapter written for stack $stack"
+
+  mkdir -p .github/workflows
+  if [ "$stack" = infra ]; then
+    cp "$AIFLOW_HOME/templates/ai-review-only.yml" .github/workflows/ai.yml
+  else
+    cp "$AIFLOW_HOME/templates/ai.yml" .github/workflows/ai.yml
+  fi
+  printf '.aiflow/logs/\n' >> .gitignore
+  git add -A
+  git commit -q -m "ci: wire up aiflow"
+  info "ai.yml installed"
+
+  gh repo create "$owner/$name" "$visibility" --source=. --remote=origin --push >/dev/null 2>&1 \
+    || die "could not create $owner/$name"
+  info "pushed to github.com/$owner/$name"
+
+  tokenfile="$CONFIG_DIR/oauth-token"
+  if [ -s "$tokenfile" ]; then
+    tr -d '[:space:]' < "$tokenfile" | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo "$owner/$name" >/dev/null 2>&1 \
+      && info "secret set" || warn "could not set the secret"
+  else
+    warn "no token at $tokenfile, so the secret was not set"
+    warn "create it once:  claude setup-token > $tokenfile && chmod 600 $tokenfile"
+  fi
+
+  grep -qxF "$owner/$name" "$REPOS_FILE" 2>/dev/null || printf '%s\n' "$owner/$name" >> "$REPOS_FILE"
+  info "added to flow status"
+
+  printf '\n'
+  warn "one step is left and it needs a browser:"
+  printf '    add %s to the Claude GitHub App\n' "$owner/$name"
+  printf '    https://github.com/settings/installations\n'
+  printf '    (choosing "All repositories" there removes this step for good)\n\n'
+  printf '  next:  cd %s && flow run design "<what to build>"\n' "$dir"
+  unset parent
+}
+
 cmd_run() {
   stage="${1:-}"
   test -n "$stage" || die "usage: flow run <$(echo "$STAGES" | tr ' ' '|')> [arguments]"
@@ -135,6 +202,7 @@ cmd_run() {
 stage_model() {
   case "$1" in
     review) echo claude-sonnet-5 ;;
+    fix) echo claude-opus-5 ;;
     *) echo claude-opus-5 ;;
   esac
 }
@@ -145,6 +213,7 @@ stage_tools() {
     plan)    echo "Read,Grep,Glob,Write" ;;
     build)   echo "Bash,Read,Write,Edit,Grep,Glob" ;;
     review)  echo "Bash(git:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(find:*),Read,Grep,Glob,Write" ;;
+    fix)     echo "Bash,Read,Write,Edit,Grep,Glob" ;;
     *)       echo "Read,Grep,Glob" ;;
   esac
 }
@@ -153,6 +222,7 @@ stage_turns() {
   case "$1" in
     review) echo 12 ;;
     design|plan) echo 20 ;;
+    fix) echo 30 ;;
     *) echo 60 ;;
   esac
 }
@@ -304,8 +374,9 @@ usage() {
   cat <<'TXT'
 flow — a reusable AI workflow harness across projects
 
+  flow new <name>        create the repo, wire CI, set the secret, register it
   flow init              detect the stack, write .aiflow/project.yaml
-  flow run <stage>       design | plan | build | review
+  flow run <stage>       design | plan | build | review | fix
   flow fan "a" "b"       run several features in parallel via git worktrees
   flow fan-clean         remove worktrees that are already clean
   flow status            summary of every repo in ~/.config/flow/repos
@@ -316,6 +387,7 @@ TXT
 }
 
 case "${1:-}" in
+  new)       shift; cmd_new "$@" ;;
   init)      shift; cmd_init "$@" ;;
   run)       shift; cmd_run "$@" ;;
   fan)       shift; cmd_fan "$@" ;;
