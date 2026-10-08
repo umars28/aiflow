@@ -103,10 +103,18 @@ cmd_run() {
   mkdir -p "$root/.aiflow/logs"
   log="$root/.aiflow/logs/$stage.log"
 
+  st=$(mktemp)
   {
     cat "$prompt"
     if [ $# -gt 0 ]; then printf '\n\n## Arguments\n\n%s\n' "$*"; fi
-  } | claude -p --model "$model" --max-turns "$turns" --allowedTools "$(stage_tools "$stage")" 2>&1 | tee "$log"
+  } | { claude -p --model "$model" --max-turns "$turns" --allowedTools "$(stage_tools "$stage")" 2>&1; printf '%s' "$?" > "$st"; } | tee "$log"
+
+  code=$(cat "$st"); rm -f "$st"
+  if [ "${code:-1}" -ne 0 ]; then
+    warn "the agent exited with status $code"
+    grep -qi "max turns" "$log" && warn "it ran out of turns; raise --max-turns or re-run to resume"
+    die "stage '$stage' did not finish — not gating a partial result"
+  fi
 
   if [ -z "$(git -C "$root" status --porcelain)" ]; then
     warn "the agent wrote nothing"
@@ -145,7 +153,7 @@ stage_turns() {
   case "$1" in
     review) echo 12 ;;
     design|plan) echo 20 ;;
-    *) echo 40 ;;
+    *) echo 60 ;;
   esac
 }
 

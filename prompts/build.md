@@ -21,6 +21,9 @@ Never move to the next slice on a red suite. If one slice fights back twice in a
 building — report what blocked you and name the slices already finished. An honest partial is
 worth more than nine slices nothing can verify.
 
+A slice whose code already exists and whose tests pass is done. Begin at the first unfinished
+one; do not rewrite work a previous run completed.
+
 Follow the installed `tdd` skill for the red-green-refactor details.
 
 **On an empty repository** the first slice creates only the manifest (`go.mod`,
