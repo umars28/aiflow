@@ -21,8 +21,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: check
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --depth=50 origin "$BASE"
+          changed=$(git diff --name-only "origin/$BASE...$HEAD_SHA")
+          code=$(printf '%s\n' "$changed" | grep -v '^\.aiflow/' | grep -v '^$' || true)
+          if [ -z "$code" ]; then
+            echo "only .aiflow/ changed, nothing to review"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   review:
-    if: github.event.pull_request.draft == false
+    needs: guard
+    if: needs.guard.outputs.run == 'true' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
