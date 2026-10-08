@@ -111,6 +111,12 @@ cmd_new() {
   cmd_init --stack "$stack" >/dev/null
   info "adapter written for stack $stack"
 
+  if [ "$stack" = go ] && [ ! -f go.mod ] && command -v go >/dev/null 2>&1; then
+    go mod init "github.com/$owner/$name" >/dev/null 2>&1 \
+      && info "go.mod created so CI is green from the first commit" \
+      || warn "could not run go mod init; CI will fail until go.mod exists"
+  fi
+
   mkdir -p .github/workflows
   if [ "$stack" = infra ]; then
     cp "$AIFLOW_HOME/templates/ai-review-only.yml" .github/workflows/ai.yml
