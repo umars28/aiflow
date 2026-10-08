@@ -1,0 +1,147 @@
+name: AI Feature
+
+on:
+  workflow_call:
+    inputs:
+      issue:
+        type: string
+        required: true
+      model:
+        type: string
+        default: claude-opus-5
+      max_turns:
+        type: string
+        default: "20"
+      aiflow_ref:
+        type: string
+        default: main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+concurrency:
+  group: ai-feature-${{ github.repository }}-${{ inputs.issue }}
+  cancel-in-progress: false
+
+jobs:
+  design:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v6
+        with:
+          repository: umars28/aiflow
+          ref: ${{ inputs.aiflow_ref }}
+          path: .aiflow-home
+
+      - name: Refuse a repo that was never initialised
+        run: |
+          if [ ! -f .aiflow/project.yaml ]; then
+            echo "this repo has no .aiflow/project.yaml — run 'flow init' before using ai-build"
+            exit 1
+          fi
+
+      - name: Settle on the branch
+        id: branch
+        env:
+          N: ${{ inputs.issue }}
+        run: |
+          b="feat/issue-$N"
+          if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then
+            git fetch --no-tags origin "$b"
+            git switch "$b"
+            echo "fresh=no" >> "$GITHUB_OUTPUT"
+          else
+            git switch -c "$b"
+            echo "fresh=yes" >> "$GITHUB_OUTPUT"
+          fi
+          echo "name=$b" >> "$GITHUB_OUTPUT"
+
+      - name: Read the declared stack
+        id: stack
+        run: echo "name=$(yq -r '.stack // ""' .aiflow/project.yaml)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        if: hashFiles('go.mod') != ''
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-go@v5
+        if: steps.stack.outputs.name == 'go' && hashFiles('go.mod') == ''
+        with:
+          go-version: stable
+
+      - uses: actions/setup-node@v4
+        if: steps.stack.outputs.name == 'node'
+        with:
+          node-version: lts/*
+
+      - uses: actions/setup-python@v5
+        if: steps.stack.outputs.name == 'python'
+        with:
+          python-version: '3.x'
+
+      - name: Stage the prompt
+        id: prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ inputs.issue }}
+        run: |
+          gh issue view "$N" --json title,body \
+            --jq '"# " + .title + "\n\n" + (.body // "")' > /tmp/request.md
+          if [ "$(wc -w < /tmp/request.md | tr -d ' ')" -lt 5 ]; then
+            echo "issue #$N has no usable body — write what you want built, then label it again"
+            exit 1
+          fi
+          {
+            echo 'design<<AIFLOW_EOF'
+            cat .aiflow-home/prompts/design.md
+            echo
+            echo '## The request'
+            echo
+            echo 'This came in as an issue. Treat it as the goal, not as the wording.'
+            echo
+            cat /tmp/request.md
+            echo 'AIFLOW_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Design stage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prep.outputs.design }}
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Read,Grep,Glob,Write,Bash(go test:*),Bash(npm test:*),Bash(pytest:*),Bash(cargo test:*)"
+
+      - name: Design gate
+        run: |
+          chmod +x .aiflow-home/gates/design.sh
+          .aiflow-home/gates/design.sh "$GITHUB_WORKSPACE"
+
+      - name: Land the design
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          N: ${{ inputs.issue }}
+        run: |
+          git config user.name "aiflow"
+          git config user.email "aiflow@users.noreply.github.com"
+          git add .aiflow/02-design.md
+          if git diff --cached --quiet; then
+            echo "the design is unchanged — nothing to land"
+            exit 0
+          fi
+          git commit -m "design: issue #$N"
+          git push origin "HEAD:refs/heads/$BRANCH"
+          gh issue comment "$N" --body "Design landed on \`$BRANCH\`. A pull request opens within five minutes, and build starts from there."
