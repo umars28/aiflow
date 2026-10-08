@@ -8,7 +8,7 @@ on:
         default: claude-sonnet-5
       max_turns:
         type: string
-        default: "12"
+        default: "20"
       aiflow_ref:
         type: string
         default: main
@@ -43,11 +43,13 @@ jobs:
       - name: Stage subagents and prompt
         id: prep
         run: |
-          mkdir -p .claude/agents
+          mkdir -p .claude/agents .aiflow
           cp .aiflow-home/agents/*.md .claude/agents/
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
           {
             echo 'text<<AIFLOW_EOF'
             cat .aiflow-home/prompts/review.md
+            printf '\n\n## Arguments\n\nThe base branch is available as `origin/%s`.\nWrite your findings to `.aiflow/05-review.md`. Do not post comments yourself; a later step does that.\n' "${{ github.base_ref }}"
             echo 'AIFLOW_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -58,7 +60,19 @@ jobs:
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Bash(git diff:*),Bash(git log:*),Read,Grep,Glob,Write,mcp__github_inline_comment__create_inline_comment"
+            --allowedTools "Bash(git:*),Read,Grep,Glob,Write"
+
+      - name: Post review
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          doc=.aiflow/05-review.md
+          if [ ! -f "$doc" ]; then
+            echo "no review document produced"
+            exit 0
+          fi
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$doc"
 
       - name: Gate
         run: |
