@@ -60,7 +60,7 @@ jobs:
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Bash(git:*),Read,Grep,Glob,Write"
+            --allowedTools "Bash(git:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(find:*),Read,Grep,Glob,Write"
 
       - name: Post review
         if: always()

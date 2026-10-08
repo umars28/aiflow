@@ -23,7 +23,6 @@ if [ "$located" -eq 0 ]; then
   exit 1
 fi
 
-printf '  \033[33m!\033[0m %s located findings\n' "$located"
 
 if [ "$conf" -eq 0 ] || [ "$sev" -eq 0 ]; then
   printf '  \033[31m✗\033[0m findings carry no confidence (%s) or severity (%s)\n' "$conf" "$sev"
@@ -35,5 +34,5 @@ if [ "$conf" -ne "$sev" ]; then
   exit 1
 fi
 
-printf '  \033[32m✓\033[0m %s findings, each rated\n' "$conf"
+printf '  \033[32m✓\033[0m %s findings, each rated, %s file references\n' "$conf" "$located"
 exit 0
