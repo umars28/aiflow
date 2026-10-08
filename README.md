@@ -128,6 +128,20 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo umars28/<repo>
 
 Then install the [Claude GitHub App](https://github.com/apps/claude) on that repository.
 
+## Troubleshooting
+
+Three failures cost real time on the first rollout. All three are expected behaviour, not bugs.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `startup_failure`, "workflow file issue", no logs | The repo's default workflow permission is read-only, and a called workflow may not request more than its caller holds. The caller job declared no `permissions` at all. | Declare `permissions` on every caller job in `ai.yml`. `templates/ai.yml` already does. |
+| Action logs "Workflow validation failed … identical content to the version on the default branch", then skips | Deliberate safeguard: otherwise any pull request could edit the workflow and make the agent do anything. | Land `ai.yml` on the default branch first. The pull request that introduces the workflow can never be reviewed by it. |
+| `error_max_turns` with a high `permission_denials_count` | `--allowedTools` was too narrow, so turns were spent hitting denials instead of working. | Grant `Bash(git:*)` rather than per-subcommand patterns. Check `permission_denials_count` in the run log before raising `--max-turns`. |
+
+Re-running a review without loosening the triggers: toggle the pull request to draft and back
+to ready, which fires `ready_for_review`. Pushing another commit deliberately does not
+re-trigger.
+
 ## Kill switch
 
 ```sh
