@@ -2,3 +2,5 @@ umars28/marspay
 umars28/sshm
 umars28/observability-platform
 umars28/cronx
+umars28/envdiff
+umars28/cowork-test
