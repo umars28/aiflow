@@ -154,6 +154,10 @@ cmd_new() {
     warn "run 'claude setup-token' once, then paste the sk-ant-... value into $tokenfile"
   fi
 
+  gh label create ai-build --repo "$owner/$name" --color 1D76DB \
+    --description "Start plan and build on this design" >/dev/null 2>&1 \
+    && info "label ai-build created" || warn "could not create the ai-build label"
+
   gh label create ai-review --repo "$owner/$name" --color B60205 \
     --description "Found by the nightly AI review" >/dev/null 2>&1 \
     && info "label ai-review created" || warn "could not create the ai-review label"
@@ -177,6 +181,45 @@ cmd_new() {
   printf '    (choosing "All repositories" there removes this step for good)\n\n'
   printf '  next:  cd %s && flow run design "<what to build>"\n' "$dir"
   unset parent
+}
+
+cmd_ship() {
+  need gh
+  need git
+  root=$(project_root)
+  cd "$root"
+  test -f .aiflow/02-design.md || die "no .aiflow/02-design.md — run 'flow run design' first"
+
+  branch="${1:-}"
+  if [ -z "$branch" ]; then
+    branch="feat/$(slugify "$(grep -m1 -E '^#+ ' .aiflow/02-design.md | sed 's/^#* *//')")"
+    test "$branch" != "feat/" || branch="feat/$(date -u +%Y%m%d%H%M%S)"
+  fi
+
+  cur=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$cur" = main ] || [ "$cur" = master ]; then
+    git switch -q -c "$branch"
+  else
+    branch="$cur"
+  fi
+
+  git add .aiflow/project.yaml .aiflow/02-design.md 2>/dev/null || true
+  if ! git diff --cached --quiet; then
+    git commit -q -m "design: $(grep -m1 -E '^#+ ' .aiflow/02-design.md | sed 's/^#* *//' | cut -c1-60)"
+  fi
+  git push -q -u origin "$branch" 2>/dev/null || git push -q origin "$branch"
+
+  url=$(gh pr view --json url --jq .url 2>/dev/null || true)
+  if [ -z "$url" ]; then
+    url=$(gh pr create --head "$branch" --base main \
+      --title "$(grep -m1 -E '^#+ ' .aiflow/02-design.md | sed 's/^#* *//' | cut -c1-70)" \
+      --body "Design is in \`.aiflow/02-design.md\`. Labelling this \`ai-build\` starts plan and build.")
+  fi
+  info "pull request: $url"
+
+  gh pr edit "$url" --add-label ai-build >/dev/null \
+    && info "labelled ai-build, plan and build start now" \
+    || die "could not add the ai-build label"
 }
 
 cmd_run() {
@@ -413,6 +456,7 @@ flow — a reusable AI workflow harness across projects
 
   flow new <name>        create the repo, wire CI, set the secret, register it
   flow init              detect the stack, write .aiflow/project.yaml
+  flow ship              push the design, open the pull request, label it ai-build
   flow run <stage>       design | plan | build | review | fix
   flow fan "a" "b"       run several features in parallel via git worktrees
   flow fan-clean         remove worktrees that are already clean
@@ -425,6 +469,7 @@ TXT
 
 case "${1:-}" in
   new)       shift; cmd_new "$@" ;;
+  ship)      shift; cmd_ship "$@" ;;
   init)      shift; cmd_init "$@" ;;
   run)       shift; cmd_run "$@" ;;
   fan)       shift; cmd_fan "$@" ;;
