@@ -8,7 +8,7 @@ on:
         default: claude-opus-5
       max_turns:
         type: string
-        default: "40"
+        default: "60"
       aiflow_ref:
         type: string
         default: main
@@ -39,21 +39,30 @@ jobs:
           ref: ${{ inputs.aiflow_ref }}
           path: .aiflow-home
 
+      - name: Read the declared stack
+        id: stack
+        run: echo "name=$(yq -r '.stack // ""' .aiflow/project.yaml)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         if: hashFiles('go.mod') != ''
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
-        if: hashFiles('package.json') != ''
+      - uses: actions/setup-go@v5
+        if: steps.stack.outputs.name == 'go' && hashFiles('go.mod') == ''
         with:
-          node-version-file: package.json
+          go-version: stable
+
+      - uses: actions/setup-node@v4
+        if: steps.stack.outputs.name == 'node'
+        with:
+          node-version: lts/*
 
       - uses: actions/setup-python@v5
-        if: hashFiles('pyproject.toml') != ''
+        if: steps.stack.outputs.name == 'python'
         with:
-          python-version-file: pyproject.toml
+          python-version: '3.x'
 
       - name: Stage prompts
         id: prep
