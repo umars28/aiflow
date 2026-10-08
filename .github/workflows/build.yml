@@ -1,0 +1,115 @@
+name: AI Build
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        default: claude-opus-5
+      max_turns:
+        type: string
+        default: "40"
+      aiflow_ref:
+        type: string
+        default: main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+concurrency:
+  group: ai-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v6
+        with:
+          repository: umars28/aiflow
+          ref: ${{ inputs.aiflow_ref }}
+          path: .aiflow-home
+
+      - uses: actions/setup-go@v5
+        if: hashFiles('go.mod') != ''
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: hashFiles('package.json') != ''
+        with:
+          node-version-file: package.json
+
+      - uses: actions/setup-python@v5
+        if: hashFiles('pyproject.toml') != ''
+        with:
+          python-version-file: pyproject.toml
+
+      - name: Stage prompts
+        id: prep
+        run: |
+          mkdir -p .claude/agents
+          cp .aiflow-home/agents/*.md .claude/agents/
+          for s in plan build; do
+            {
+              echo "$s<<AIFLOW_EOF"
+              cat ".aiflow-home/prompts/$s.md"
+              echo 'AIFLOW_EOF'
+            } >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Plan stage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prep.outputs.plan }}
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns 20
+            --allowedTools "Read,Grep,Glob,Write"
+
+      - name: Plan gate
+        run: |
+          chmod +x .aiflow-home/gates/plan.sh
+          .aiflow-home/gates/plan.sh "$GITHUB_WORKSPACE"
+
+      - name: Build stage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prep.outputs.build }}
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash,Read,Write,Edit,Grep,Glob"
+
+      - name: Build gate
+        run: |
+          chmod +x .aiflow-home/gates/build.sh
+          .aiflow-home/gates/build.sh "$GITHUB_WORKSPACE"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf .aiflow-home .claude/agents
+          git config user.name "aiflow"
+          git config user.email "aiflow@users.noreply.github.com"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "no changes, no pull request"
+            exit 0
+          fi
+          git add -A
+          git commit -m "feat: ${GITHUB_REF_NAME#*/}"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+          gh pr create --fill --head "$GITHUB_REF_NAME" --base main || true

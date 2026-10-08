@@ -1,0 +1,245 @@
+#!/bin/sh
+set -eu
+
+AIFLOW_HOME="${AIFLOW_HOME:-$(CDPATH= cd -- "$(dirname -- "$(readlink "$0" || echo "$0")")/.." && pwd)}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/flow"
+REPOS_FILE="$CONFIG_DIR/repos"
+STAGES="design plan build review"
+
+die() { printf 'flow: %s\n' "$1" >&2; exit 1; }
+info() { printf '\033[36m▸\033[0m %s\n' "$1"; }
+warn() { printf '\033[33m!\033[0m %s\n' "$1" >&2; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not on PATH"; }
+
+project_root() {
+  git rev-parse --show-toplevel 2>/dev/null || die "not inside a git repository"
+}
+
+adapter() {
+  root=$(project_root)
+  test -f "$root/.aiflow/project.yaml" || die "no .aiflow/project.yaml — run 'flow init' first"
+  yq -r ".$1 // \"\"" "$root/.aiflow/project.yaml"
+}
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//; s/-$//' | cut -c1-32
+}
+
+cmd_init() {
+  root=$(project_root)
+  out="$root/.aiflow/project.yaml"
+  test ! -f "$out" || die "$out already exists"
+
+  if [ -f "$root/go.mod" ]; then
+    stack=go; test="go test ./..."; lint="go vet ./..."; build="go build ./..."; chain=full
+  elif [ -f "$root/package.json" ]; then
+    stack=node; test="npm test"; lint="npm run lint --if-present"; build="npm run build --if-present"; chain=full
+  elif [ -f "$root/pyproject.toml" ] || [ -f "$root/requirements.txt" ]; then
+    stack=python; test="pytest"; lint="ruff check ."; build=""; chain=full
+  elif [ -f "$root/Cargo.toml" ]; then
+    stack=rust; test="cargo test"; lint="cargo clippy -- -D warnings"; build="cargo build"; chain=full
+  elif ls "$root"/*.tf >/dev/null 2>&1 || [ -d "$root/terraform" ] || [ -d "$root/kubernetes" ]; then
+    stack=infra; test=""; lint="terraform fmt -recursive -check"; build=""; chain=review
+  else
+    stack=unknown; test=""; lint=""; build=""; chain=review
+  fi
+
+  mkdir -p "$root/.aiflow"
+  cat > "$out" <<YAML
+stack: $stack
+test: $test
+lint: $lint
+build: $build
+migrations: ""
+chain: $chain
+YAML
+
+  info "detected stack: $stack"
+  info "wrote .aiflow/project.yaml"
+  test -n "$test" || warn "test command is empty — the build gate cannot prove anything"
+  printf '\nCheck it before relying on it:\n\n'
+  sed 's/^/  /' "$out"
+}
+
+cmd_run() {
+  stage="${1:-}"
+  test -n "$stage" || die "usage: flow run <$(echo "$STAGES" | tr ' ' '|')> [arguments]"
+  shift
+  case " $STAGES " in *" $stage "*) ;; *) die "unknown stage: $stage" ;; esac
+
+  prompt="$AIFLOW_HOME/prompts/$stage.md"
+  gate="$AIFLOW_HOME/gates/$stage.sh"
+  test -f "$prompt" || die "prompt not found: $prompt"
+
+  root=$(project_root)
+  chain=$(adapter chain)
+  if [ "$chain" = review ] && [ "$stage" != review ] && [ "$stage" != design ]; then
+    die "this repo is chain:review — stage '$stage' is blocked on purpose"
+  fi
+
+  model=$(stage_model "$stage")
+  turns=$(stage_turns "$stage")
+
+  info "$stage · model $model · max-turns $turns"
+  mkdir -p "$root/.aiflow/logs"
+  log="$root/.aiflow/logs/$stage.log"
+
+  {
+    cat "$prompt"
+    if [ $# -gt 0 ]; then printf '\n\n## Arguments\n\n%s\n' "$*"; fi
+  } | claude -p --model "$model" --max-turns "$turns" 2>&1 | tee "$log"
+
+  if [ -x "$gate" ]; then
+    info "gate: $(basename "$gate")"
+    AIFLOW_HOME="$AIFLOW_HOME" "$gate" "$root" || die "gate '$stage' failed — chain stops here"
+    info "gate passed"
+  else
+    warn "no gate for '$stage' — nothing proves this result"
+  fi
+}
+
+stage_model() {
+  case "$1" in
+    review) echo claude-sonnet-5 ;;
+    *) echo claude-opus-5 ;;
+  esac
+}
+
+stage_turns() {
+  case "$1" in
+    review) echo 12 ;;
+    design|plan) echo 20 ;;
+    *) echo 40 ;;
+  esac
+}
+
+cmd_fan() {
+  test $# -gt 0 || die "usage: flow fan \"feature a\" \"feature b\" ..."
+  test $# -le 3 || die "three worktrees max — beyond that your quota and your review time are the bottleneck"
+  need git
+
+  root=$(project_root)
+  base=$(basename "$root")
+  cd "$root"
+
+  i=0
+  for desc in "$@"; do
+    i=$((i + 1))
+    slug=$(slugify "$desc")
+    test -n "$slug" || die "description #$i produced no valid branch name"
+    branch="ai/$slug"
+    wt="$root/../$base-$slug"
+
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+      warn "branch $branch already exists — skipped"
+      continue
+    fi
+
+    git worktree add -b "$branch" "$wt" HEAD >/dev/null
+    info "worktree $i: $wt  ($branch)"
+
+    mkdir -p "$wt/.aiflow/logs"
+    ( cd "$wt" && "$0" run build "$desc" >"$wt/.aiflow/logs/fan.log" 2>&1 ) &
+  done
+
+  printf '\n'
+  info "$# agents running in parallel. Follow them with:"
+  printf '    tail -f %s/../%s-*/.aiflow/logs/fan.log\n' "$root" "$base"
+  info "clean up afterwards with: flow fan-clean"
+  wait
+}
+
+cmd_fan_clean() {
+  root=$(project_root)
+  cd "$root"
+  git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
+    test "$wt" != "$root" || continue
+    if [ -z "$(git -C "$wt" status --porcelain)" ]; then
+      git worktree remove "$wt"
+      info "removed $wt"
+    else
+      warn "uncommitted changes, left alone: $wt"
+    fi
+  done
+}
+
+cmd_status() {
+  need gh
+  need jq
+
+  if [ ! -f "$REPOS_FILE" ]; then
+    mkdir -p "$CONFIG_DIR"
+    die "no repo list yet. Create $REPOS_FILE, one owner/repo per line"
+  fi
+
+  printf '\n  \033[2m%-34s %-10s %-14s %-6s %s\033[0m\n' repo run stage age PRs
+  printf '  \033[2m%s\033[0m\n' '──────────────────────────────────────────────────────────────────────────'
+
+  grep -v '^[[:space:]]*\(#\|$\)' "$REPOS_FILE" | while IFS= read -r repo; do
+    run=$(gh run list --repo "$repo" --limit 1 \
+            --json status,conclusion,name,createdAt \
+            --jq '.[0] // empty' 2>/dev/null || true)
+
+    if [ -z "$run" ]; then
+      mark='\033[2m·\033[0m'; state='idle'; name='—'; age='—'
+    else
+      status=$(printf '%s' "$run" | jq -r .status)
+      concl=$(printf '%s' "$run" | jq -r '.conclusion // ""')
+      name=$(printf '%s' "$run" | jq -r .name | awk '{ if (length($0) > 14) print substr($0,1,13) "…"; else print }')
+      created=$(printf '%s' "$run" | jq -r .createdAt)
+      age=$(humanize_age "$created")
+      case "$status:$concl" in
+        completed:success)   mark='\033[32m✓\033[0m'; state='passed' ;;
+        completed:failure)   mark='\033[31m✗\033[0m'; state='failed' ;;
+        completed:cancelled) mark='\033[33m⊘\033[0m'; state='cancelled' ;;
+        in_progress:*|queued:*) mark='\033[36m●\033[0m'; state='running' ;;
+        *) mark='\033[2m·\033[0m'; state="$status" ;;
+      esac
+    fi
+
+    prs=$(gh pr list --repo "$repo" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+    test "$prs" -gt 0 && prtxt="$prs open" || prtxt='—'
+
+    # shellcheck disable=SC2059
+    printf "  %-34s $mark %-8s %-14s %-6s %s\n" "$(printf '%s' "$repo" | cut -c1-34)" "$state" "$name" "$age" "$prtxt"
+  done
+  printf '\n'
+}
+
+humanize_age() {
+  now=$(date -u +%s)
+  then=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
+         || date -u -d "$1" +%s 2>/dev/null || echo "$now")
+  d=$((now - then))
+  if   [ "$d" -lt 60 ];    then printf '%ds' "$d"
+  elif [ "$d" -lt 3600 ];  then printf '%dm' "$((d / 60))"
+  elif [ "$d" -lt 86400 ]; then printf '%dh' "$((d / 3600))"
+  else printf '%dd' "$((d / 86400))"
+  fi
+}
+
+usage() {
+  cat <<'TXT'
+flow — a reusable AI workflow harness across projects
+
+  flow init              detect the stack, write .aiflow/project.yaml
+  flow run <stage>       design | plan | build | review
+  flow fan "a" "b"       run several features in parallel via git worktrees
+  flow fan-clean         remove worktrees that are already clean
+  flow status            summary of every repo in ~/.config/flow/repos
+
+Environment:
+  AIFLOW_HOME            root of the aiflow checkout (default: relative to this script)
+TXT
+}
+
+case "${1:-}" in
+  init)      shift; cmd_init "$@" ;;
+  run)       shift; cmd_run "$@" ;;
+  fan)       shift; cmd_fan "$@" ;;
+  fan-clean) shift; cmd_fan_clean "$@" ;;
+  status)    shift; cmd_status "$@" ;;
+  ''|-h|--help|help) usage ;;
+  *) die "unknown command: $1 (try 'flow help')" ;;
+esac

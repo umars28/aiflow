@@ -1,0 +1,66 @@
+name: AI Review
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        default: claude-sonnet-5
+      max_turns:
+        type: string
+        default: "12"
+      aiflow_ref:
+        type: string
+        default: main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+concurrency:
+  group: ai-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v6
+        with:
+          repository: umars28/aiflow
+          ref: ${{ inputs.aiflow_ref }}
+          path: .aiflow-home
+
+      - name: Stage subagents and prompt
+        id: prep
+        run: |
+          mkdir -p .claude/agents
+          cp .aiflow-home/agents/*.md .claude/agents/
+          {
+            echo 'text<<AIFLOW_EOF'
+            cat .aiflow-home/prompts/review.md
+            echo 'AIFLOW_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prep.outputs.text }}
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Read,Grep,Glob,Write,mcp__github_inline_comment__create_inline_comment"
+
+      - name: Gate
+        run: |
+          chmod +x .aiflow-home/gates/review.sh
+          .aiflow-home/gates/review.sh "$GITHUB_WORKSPACE"
