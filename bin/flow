@@ -117,6 +117,13 @@ cmd_new() {
   else
     cp "$AIFLOW_HOME/templates/ai.yml" .github/workflows/ai.yml
   fi
+  if [ -f "$AIFLOW_HOME/templates/ci-$stack.yml" ]; then
+    cp "$AIFLOW_HOME/templates/ci-$stack.yml" .github/workflows/ci.yml
+    info "ci.yml installed for $stack"
+  else
+    warn "no CI template for $stack yet, only the AI workflow was installed"
+  fi
+  printf '* @%s\n' "$owner" > .github/CODEOWNERS
   printf '.aiflow/logs/\n' >> .gitignore
   git add -A
   git commit -q -m "ci: wire up aiflow"
