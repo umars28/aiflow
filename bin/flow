@@ -23,7 +23,7 @@ adapter() {
 }
 
 slugify() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//; s/-$//' | cut -c1-32
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-32 | sed 's/^-*//; s/-*$//'
 }
 
 cmd_init() {
