@@ -15,6 +15,8 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - TELEGRAM_TOKEN=__SET_ON_SERVER__
       - TELEGRAM_CHAT_ID=705649915
+      - GITHUB_TOKEN=__SET_ON_SERVER__
+      - AIFLOW_REPOS=umars28/marspay,umars28/sshm,umars28/cronx,umars28/envdiff,umars28/aiflow-sandbox,umars28/cowork-test
       - AIFLOW_STATUS_URL=https://umars28.github.io/aiflow/status.json
     volumes:
       - n8n_data:/home/node/.n8n

@@ -66,7 +66,10 @@ fi
 
 say "compose"
 sshx "mkdir -p $REMOTE/workflows"
-sed -e "s|TELEGRAM_TOKEN=.*|TELEGRAM_TOKEN=$TELEGRAM_TOKEN|" \
+GH_TOKEN_VALUE=$(sshx 'tr -d "[:space:]" < /root/.github-token 2>/dev/null' || true)
+test -n "$GH_TOKEN_VALUE" || warn "no /root/.github-token on the server; n8n cannot act on GitHub"
+sed -e "s|GITHUB_TOKEN=.*|GITHUB_TOKEN=$GH_TOKEN_VALUE|" \
+    -e "s|TELEGRAM_TOKEN=.*|TELEGRAM_TOKEN=$TELEGRAM_TOKEN|" \
     -e "s|TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID|" \
     -e "s|AIFLOW_STATUS_URL=.*|AIFLOW_STATUS_URL=$STATUS_URL|" \
     "$HERE/compose.yaml" | sshx "umask 077; cat > $REMOTE/compose.yaml"
