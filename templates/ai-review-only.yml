@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [ai-fix]
+  issues:
+    types: [labeled]
 
 jobs:
   review:
@@ -27,7 +29,9 @@ jobs:
     secrets: inherit
 
   fix:
-    if: github.event_name == 'repository_dispatch'
+    if: >-
+      github.event_name == 'repository_dispatch' ||
+      (github.event_name == 'issues' && github.event.label.name == 'ai-review')
     permissions:
       contents: write
       issues: read
@@ -35,5 +39,5 @@ jobs:
       id-token: write
     uses: umars28/aiflow/.github/workflows/fix.yml@main
     with:
-      issue: ${{ github.event.client_payload.issue }}
+      issue: ${{ github.event.client_payload.issue || github.event.issue.number }}
     secrets: inherit
