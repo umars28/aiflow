@@ -19,6 +19,8 @@ one thing, and only that file. Do not explore the repo.
 - External input reaching a query, a path, or a command without validation at the boundary
 - DB or HTTP calls inside a loop that could be batched
 - Money as float, timestamps without a timezone, rounding left implicit
+- Credentials, keys, or config written wider than `0600`, directories wider than `0700`
+- In-place truncating writes with no backup and no temp-file-then-rename
 - Patterns that differ from comparable modules in the same repo
 - Shared state without a lock, goroutines with no stop path, context not propagated
 

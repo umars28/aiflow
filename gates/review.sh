@@ -9,25 +9,31 @@ if [ ! -f "$doc" ]; then
   exit 1
 fi
 
-if grep -qiE 'no findings|nothing found|clean' "$doc"; then
+if grep -qiE 'no findings|nothing found|nothing to flag' "$doc"; then
   printf '  \033[32m✓\033[0m clean, no findings\n'
   exit 0
 fi
 
-findings=$(grep -ciE '^[[:space:]]*[-*0-9].*:[0-9]+' "$doc" || true)
-rated=$(grep -ciE 'confidence' "$doc" || true)
+located=$(grep -coE '[A-Za-z0-9_./-]+\.[A-Za-z]+:[0-9]+' "$doc" || true)
+conf=$(grep -ciE 'confidence' "$doc" || true)
+sev=$(grep -ciE 'severity' "$doc" || true)
 
-if [ "$findings" -eq 0 ]; then
-  printf '  \033[31m✗\033[0m does not declare clean, but no located findings are readable\n'
+if [ "$located" -eq 0 ]; then
+  printf '  \033[31m✗\033[0m no file:line reference anywhere — findings cannot be acted on\n'
   exit 1
 fi
 
-printf '  \033[33m!\033[0m %s findings\n' "$findings"
+printf '  \033[33m!\033[0m %s located findings\n' "$located"
 
-if [ "$rated" -lt "$findings" ]; then
-  printf '  \033[31m✗\033[0m %s of %s findings have no confidence/severity\n' "$((findings - rated))" "$findings"
+if [ "$conf" -eq 0 ] || [ "$sev" -eq 0 ]; then
+  printf '  \033[31m✗\033[0m findings carry no confidence (%s) or severity (%s)\n' "$conf" "$sev"
   exit 1
 fi
 
-printf '  \033[32m✓\033[0m every finding carries confidence and severity\n'
+if [ "$conf" -ne "$sev" ]; then
+  printf '  \033[31m✗\033[0m %s confidence markers but %s severity markers — some findings are unrated\n' "$conf" "$sev"
+  exit 1
+fi
+
+printf '  \033[32m✓\033[0m %s findings, each rated\n' "$conf"
 exit 0

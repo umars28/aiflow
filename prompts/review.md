@@ -22,6 +22,8 @@ Exploring the whole repo at this stage is the single most wasteful thing you can
 | System boundary | Input from HTTP, files, or external APIs reaching a query or the filesystem unvalidated |
 | Queries in loops | DB or HTTP calls inside an iteration that could be batched |
 | Money and time | Money as float, timestamps without a timezone, rounding left implicit |
+| File modes and secrets | Credentials, keys, or config written with a mode wider than `0600`, directories wider than `0700`, secrets reaching logs or argv |
+| Destructive writes | Truncating a file in place with no backup and no temp-file-then-rename, so a crash or an empty input destroys the original |
 | Diverges from neighbours | A pattern that differs from comparable modules in the same repo |
 | Concurrency | Shared state without a lock, goroutines with no stop path, context not propagated |
 
