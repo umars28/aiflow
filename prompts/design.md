@@ -14,6 +14,11 @@ Figure the project out yourself. Do not ask.
 - Run the test command once. If it is already red before you start, stop and say so. A red
   baseline makes every later signal meaningless.
 
+**On an empty repository** there is nothing to imitate, so say that in one line and define the
+template instead: the directory layout, the package boundaries, and the one external dependency
+you are willing to take. Every later slice follows those choices, so write them as decisions,
+not as suggestions. Skip the baseline test run; there is no test command to run yet.
+
 ## What to write
 
 Write `.aiflow/02-design.md` with these four sections, using exactly these headings:

@@ -23,6 +23,11 @@ worth more than nine slices nothing can verify.
 
 Follow the installed `tdd` skill for the red-green-refactor details.
 
+**On an empty repository** the first slice creates only the manifest (`go.mod`,
+`package.json`, `pyproject.toml`, `Cargo.toml`) and one failing test. No feature code. The test
+command must actually run and fail for the reason you intended before anything else is written.
+Everything after that follows the normal loop.
+
 ## Style
 
 Write code that reads like the code around it: match the naming, layering, error handling, and

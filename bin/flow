@@ -27,11 +27,29 @@ slugify() {
 }
 
 cmd_init() {
+  forced=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stack) forced="${2:-}"; shift 2 ;;
+      --stack=*) forced="${1#--stack=}"; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
   root=$(project_root)
   out="$root/.aiflow/project.yaml"
   test ! -f "$out" || die "$out already exists"
 
-  if [ -f "$root/go.mod" ]; then
+  if [ -n "$forced" ]; then
+    case "$forced" in
+      go)     stack=go; test="go test ./..."; lint="go vet ./..."; build="go build ./..."; chain=full ;;
+      node)   stack=node; test="npm test"; lint="npm run lint --if-present"; build="npm run build --if-present"; chain=full ;;
+      python) stack=python; test="pytest"; lint="ruff check ."; build=""; chain=full ;;
+      rust)   stack=rust; test="cargo test"; lint="cargo clippy -- -D warnings"; build="cargo build"; chain=full ;;
+      infra)  stack=infra; test=""; lint="terraform fmt -recursive -check"; build=""; chain=review ;;
+      *) die "unknown stack '$forced' (go|node|python|rust|infra)" ;;
+    esac
+  elif [ -f "$root/go.mod" ]; then
     stack=go; test="go test ./..."; lint="go vet ./..."; build="go build ./..."; chain=full
   elif [ -f "$root/package.json" ]; then
     stack=node; test="npm test"; lint="npm run lint --if-present"; build="npm run build --if-present"; chain=full
@@ -42,7 +60,7 @@ cmd_init() {
   elif ls "$root"/*.tf >/dev/null 2>&1 || [ -d "$root/terraform" ] || [ -d "$root/kubernetes" ]; then
     stack=infra; test=""; lint="terraform fmt -recursive -check"; build=""; chain=review
   else
-    stack=unknown; test=""; lint=""; build=""; chain=review
+    die "cannot detect a stack here. For a new project say which one: flow init --stack go|node|python|rust|infra"
   fi
 
   mkdir -p "$root/.aiflow"
