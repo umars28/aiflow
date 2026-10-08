@@ -1,0 +1,44 @@
+name: Status
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+  workflow_run:
+    workflows: [AI Review, AI Build, AI Nightly]
+    types: [completed]
+
+concurrency:
+  group: status
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Collect
+        env:
+          GH_TOKEN: ${{ secrets.STATUS_TOKEN || github.token }}
+          AIFLOW_REPOS: repos.txt
+        run: |
+          chmod +x bin/flow
+          ./bin/flow status --json > docs/status.json
+          jq -r '"\(.repos | length) repos, generated \(.generated_at)"' docs/status.json
+
+      - name: Commit when changed
+        run: |
+          if git diff --quiet -- docs/status.json; then
+            echo "unchanged"
+            exit 0
+          fi
+          git config user.name "aiflow"
+          git config user.email "aiflow@users.noreply.github.com"
+          git add docs/status.json
+          git commit -m "chore: refresh status"
+          git push

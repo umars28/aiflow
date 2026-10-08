@@ -164,45 +164,83 @@ cmd_fan_clean() {
   done
 }
 
+repo_list() {
+  if [ -n "${AIFLOW_REPOS:-}" ] && [ -f "$AIFLOW_REPOS" ]; then
+    src="$AIFLOW_REPOS"
+  elif [ -f "$REPOS_FILE" ]; then
+    src="$REPOS_FILE"
+  else
+    mkdir -p "$CONFIG_DIR"
+    die "no repo list yet. Create $REPOS_FILE, one owner/repo per line"
+  fi
+  grep -v '^[[:space:]]*\(#\|$\)' "$src"
+}
+
+collect() {
+  repo_list | while IFS= read -r repo; do
+    run=$(gh run list --repo "$repo" --limit 1 \
+            --json status,conclusion,name,createdAt,url,headBranch \
+            --jq '.[0] // empty' 2>/dev/null || true)
+    prs=$(gh pr list --repo "$repo" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+
+    if [ -z "$run" ]; then
+      printf '%s' '{}' | jq -c --arg repo "$repo" --argjson prs "$prs" \
+        '{repo:$repo, state:"idle", stage:null, branch:null, created_at:null, url:null, prs:$prs}'
+    else
+      printf '%s' "$run" | jq -c --arg repo "$repo" --argjson prs "$prs" '
+        {
+          repo: $repo,
+          state: (
+            if .status == "completed" then
+              (if .conclusion == "success" then "passed"
+               elif .conclusion == "failure" then "failed"
+               elif .conclusion == "cancelled" then "cancelled"
+               else (.conclusion // "unknown") end)
+            elif .status == "in_progress" or .status == "queued" then "running"
+            else .status end
+          ),
+          stage: .name,
+          branch: .headBranch,
+          created_at: .createdAt,
+          url: .url,
+          prs: $prs
+        }'
+    fi
+  done
+}
+
 cmd_status() {
   need gh
   need jq
 
-  if [ ! -f "$REPOS_FILE" ]; then
-    mkdir -p "$CONFIG_DIR"
-    die "no repo list yet. Create $REPOS_FILE, one owner/repo per line"
+  if [ "${1:-}" = "--json" ]; then
+    collect | jq -s --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{generated_at:$at, repos:.}'
+    return
   fi
 
   printf '\n  \033[2m%-34s %-10s %-14s %-6s %s\033[0m\n' repo run stage age PRs
   printf '  \033[2m%s\033[0m\n' '──────────────────────────────────────────────────────────────────────────'
 
-  grep -v '^[[:space:]]*\(#\|$\)' "$REPOS_FILE" | while IFS= read -r repo; do
-    run=$(gh run list --repo "$repo" --limit 1 \
-            --json status,conclusion,name,createdAt \
-            --jq '.[0] // empty' 2>/dev/null || true)
+  collect | while IFS= read -r row; do
+    repo=$(printf '%s' "$row" | jq -r .repo)
+    state=$(printf '%s' "$row" | jq -r .state)
+    stage=$(printf '%s' "$row" | jq -r '.stage // "—"' | awk '{ if (length($0) > 14) print substr($0,1,13) "…"; else print }')
+    created=$(printf '%s' "$row" | jq -r '.created_at // ""')
+    prs=$(printf '%s' "$row" | jq -r .prs)
 
-    if [ -z "$run" ]; then
-      mark='\033[2m·\033[0m'; state='idle'; name='—'; age='—'
-    else
-      status=$(printf '%s' "$run" | jq -r .status)
-      concl=$(printf '%s' "$run" | jq -r '.conclusion // ""')
-      name=$(printf '%s' "$run" | jq -r .name | awk '{ if (length($0) > 14) print substr($0,1,13) "…"; else print }')
-      created=$(printf '%s' "$run" | jq -r .createdAt)
-      age=$(humanize_age "$created")
-      case "$status:$concl" in
-        completed:success)   mark='\033[32m✓\033[0m'; state='passed' ;;
-        completed:failure)   mark='\033[31m✗\033[0m'; state='failed' ;;
-        completed:cancelled) mark='\033[33m⊘\033[0m'; state='cancelled' ;;
-        in_progress:*|queued:*) mark='\033[36m●\033[0m'; state='running' ;;
-        *) mark='\033[2m·\033[0m'; state="$status" ;;
-      esac
-    fi
-
-    prs=$(gh pr list --repo "$repo" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+    test -n "$created" && age=$(humanize_age "$created") || age='—'
     test "$prs" -gt 0 && prtxt="$prs open" || prtxt='—'
 
+    case "$state" in
+      passed)    mark='\033[32m✓\033[0m' ;;
+      failed)    mark='\033[31m✗\033[0m' ;;
+      cancelled) mark='\033[33m⊘\033[0m' ;;
+      running)   mark='\033[36m●\033[0m' ;;
+      *)         mark='\033[2m·\033[0m' ;;
+    esac
+
     # shellcheck disable=SC2059
-    printf "  %-34s $mark %-8s %-14s %-6s %s\n" "$(printf '%s' "$repo" | cut -c1-34)" "$state" "$name" "$age" "$prtxt"
+    printf "  %-34s $mark %-8s %-14s %-6s %s\n" "$(printf '%s' "$repo" | cut -c1-34)" "$state" "$stage" "$age" "$prtxt"
   done
   printf '\n'
 }
