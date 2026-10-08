@@ -33,12 +33,16 @@ if [ -n "$lintcmd" ]; then
   fi
 fi
 
-changed=$( { git -C "$root" diff --name-only HEAD; git -C "$root" ls-files --others --exclude-standard; } | sort -u )
+TESTPAT='_test\.(go|py|ts|js)$|\.test\.(ts|js)$|_spec\.rb$|(^|/)tests?/'
+changed=$( { git -C "$root" diff --name-only HEAD; git -C "$root" ls-files --others --exclude-standard; } \
+           | sort -u | grep -v '^\.aiflow/' | grep -v '^$' || true )
 
-if printf '%s\n' "$changed" | grep -qE '_test\.(go|py|ts|js)$|\.test\.(ts|js)$|_spec\.rb$|(^|/)tests?/'; then
+if [ -z "$changed" ]; then
+  printf '  \033[32m✓\033[0m nothing left to build, every slice was already done\n'
+elif printf '%s\n' "$changed" | grep -qE "$TESTPAT"; then
   printf '  \033[32m✓\033[0m test files changed alongside the code\n'
 else
-  printf '  \033[31m✗\033[0m no test file changed — new code without a test does not pass\n'
+  printf '  \033[31m✗\033[0m source changed but no test did — that does not pass\n'
   fail=1
 fi
 
