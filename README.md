@@ -3,6 +3,26 @@
 A reusable AI workflow harness shared across projects. Prompts, gates, and CI workflows live
 here; each project keeps only two files.
 
+**Live dashboard:** [umars28.github.io/aiflow](https://umars28.github.io/aiflow/)
+
+## At a glance
+
+| | |
+|---|---|
+| **Problem** | AI coding agents are useful but need someone watching them, and every repository ends up with its own copy of prompts and CI glue. |
+| **Approach** | One shared harness. Each stage (`design → plan → build → review`) ends in a **gate that is a plain exit code**, not an AI judging another AI. A failed gate stops the chain, which replaces watching the agent yourself. |
+| **Adoption cost** | Two files per project: `.aiflow/project.yaml` and a 1-file GitHub Actions caller. Everything else is reused from here. |
+| **Runs without a laptop** | Reviews, builds and nightly runs execute in GitHub Actions. n8n sends alerts. A cron job publishes `status.json` to GitHub Pages every 30 minutes. |
+| **Safety** | Infra repos are review-only, so no stage can write code or `apply`. Quota brakes cap turns, timeouts and triggers. Each repo has a kill switch. |
+| **Stack** | POSIX shell CLI (`bin/flow`), GitHub Actions reusable workflows, Claude Code, n8n on a hardened VPS, a static dashboard |
+| **In use on** | marspay, sshm, observability-platform, cronx, envdiff (see [`repos.txt`](repos.txt)) |
+
+What I would point a reviewer to:
+
+- [Gates](#gates): every check is deterministic and fails with an exit code.
+- [Troubleshooting](#troubleshooting): three real rollout failures, with root cause and fix.
+- [`n8n/README.md`](n8n/README.md): the VPS can be rebuilt from zero with one command, and nothing irreplaceable lives on it.
+
 ## Shape
 
 ```
